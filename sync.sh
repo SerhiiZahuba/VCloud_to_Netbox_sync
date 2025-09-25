@@ -1,6 +1,6 @@
 #!/bin/bash
 set -x
-CLOUD_URL="https://iaas-bm2.gigacloud.ua"
+CLOUD_URL="https://cloud_url"
 CLOUD_TOKEN="TOKEN"
 NETBOX_URL="https://netbox.example.com/api"
 NETBOX_TOKEN="TOKEN"
@@ -55,6 +55,7 @@ create_vm() {
     local EXT_IP="$6"
     local MAC="$7"
     local NET="$8"
+    local DISK="$9"
 
     RESP=$(curl -s -w "\n%{http_code}" -X POST "$NETBOX_URL/virtualization/virtual-machines/" \
         -H "Authorization: Token $NETBOX_TOKEN" \
@@ -69,7 +70,7 @@ create_vm() {
             \"platform\": $NETBOX_PLATFORM,
             \"vcpus\": $CPU,
             \"memory\": $RAM,
-            \"disk\": 50,
+            \"disk\": $DISK,
             \"comments\": \"auto sync from cloud\",
             \"local_context_data\": {
                 \"ip_address\": \"$IP\",
@@ -144,6 +145,7 @@ while :; do
         HREF=$(echo "$vm" | jq -r '.href')
         CPU=$(echo "$vm" | jq -r '.numberOfCpus // 0')
         RAM=$(echo "$vm" | jq -r '.memoryMB // 0')
+        DISK=$(echo "$vm" | jq -r '.totalStorageAllocatedMb')
 
         DETAILS=$(curl -s -H "Accept: application/*+json;version=38.1" -H "Authorization: Bearer $TOKEN" "$HREF")
 
@@ -153,9 +155,9 @@ while :; do
             MAC=$(echo "$conn" | jq -r '.macAddress // ""')
             NET=$(echo "$conn" | jq -r '.network // ""')
 
-            log "↘️ vCloud: $NAME | $STATUS | CPU:$CPU | RAM:$RAM | IP:$IP | Ext:$EXT_IP | MAC:$MAC | Net:$NET"
+            log "↘️ vCloud: $NAME | $STATUS | CPU:$CPU | RAM:$RAM | IP:$IP | Ext:$EXT_IP | MAC:$MAC | Net:$NET | Disk:$DISK"
 
-            VM_ID=$(create_vm "$NAME" "$STATUS" "$CPU" "$RAM" "$IP" "$EXT_IP" "$MAC" "$NET")
+            VM_ID=$(create_vm "$NAME" "$STATUS" "$CPU" "$RAM" "$IP" "$EXT_IP" "$MAC" "$NET" "$DISK")
             log "✅ Створено VM $NAME (ID: $VM_ID)"
 
             IFACE_ID=$(create_interface "$VM_ID")
