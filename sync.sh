@@ -1,8 +1,10 @@
 #!/bin/bash
 #set -x
 
-CLOUD_URL="https://cloud_url"
-CLOUD_TOKEN="TOKEN"
+VCLOUD_USER="apiuser@ORG"
+VCLOUD_PASS="apipassuser"
+VCLOUD_HOST="https://cloud_host"
+
 NETBOX_URL="https://netbox.example.com/api"
 NETBOX_TOKEN="TOKEN"
 
@@ -12,6 +14,7 @@ NETBOX_ROLE=8
 NETBOX_TENANT=10
 NETBOX_PLATFORM=5
 SYNC_TEMPLATES=false
+SYNC_POWEROFF=false
 
 LOG_FILE="sync_vms.log"
 
@@ -19,24 +22,57 @@ touch "$LOG_FILE"
 
 # ==================================
 
+
+# ==================================
+
 log() {
     echo "[$(date '+%F %T')] $1" | tee -a "$LOG_FILE"
 }
 
+# --- get token ---- #
 
-# --- Check access to vCloud ---
+get_vcloud_token() {
+  local creds
+  creds=$(echo -n "${VCLOUD_USER}:${VCLOUD_PASS}" | base64)
+
+  RESPONSE_HEADERS=$(mktemp)
+  curl -s -D "$RESPONSE_HEADERS" \
+       -X POST \
+       -H "Authorization: Basic $creds" \
+       -H "Accept: application/*;version=38.1" \
+       "${VCLOUD_HOST}/cloudapi/1.0.0/sessions" -o /dev/null
+
+  VCLOUD_TOKEN=$(grep -i "X-VMWARE-VCLOUD-ACCESS-TOKEN" "$RESPONSE_HEADERS" | awk '{print $2}' | tr -d '\r\n')
+  rm -f "$RESPONSE_HEADERS"
+
+  if [ -z "$VCLOUD_TOKEN" ]; then
+    log "❌ Не вдалося отримати токен vCloud"
+    exit 1
+  else
+    log "✅ Отримано токен vCloud"
+  fi
+}
+
+
+# --- Викликаємо отримання токена ---
+get_vcloud_token
+
+# --- Перевірка доступу до vCloud ---
 VCLOUD_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-    -H "Accept: application/*+json;version=38.1" -H "Authorization: Bearer $CLOUD_TOKEN" \
-    "$CLOUD_URL/api/query?type=vm&page=1&pageSize=1&format=records")
+    -H "Accept: application/*+json;version=38.1" -H "Authorization: Bearer $VCLOUD_TOKEN" \
+    "$VCLOUD_HOST/api/query?type=vm&page=1&pageSize=1&format=records")
 
 if [ "$VCLOUD_STATUS" -ne 200 ]; then
     log "❌ Помилка: немає доступу до vCloud (код $VCLOUD_STATUS)"
     exit 1
 fi
 
-log "✅ Connect to vCloud successful"
+log "✅ Підключення до vCloud успішне"
 
-# --- Check access to NetBox ---
+
+
+
+# --- Перевірка доступу до NetBox ---
 NB_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
     -H "Authorization: Token $NETBOX_TOKEN" "$NETBOX_URL/")
 
@@ -45,7 +81,9 @@ if [ "$NB_STATUS" -ne 200 ]; then
     exit 1
 fi
 
-log "✅ Connect to NetBox successful"
+log "✅ Підключення до NetBox успішне"
+
+
 
 # --- Функції роботи з NetBox ---
 create_vm() {
@@ -130,11 +168,11 @@ create_ip() {
     echo "$RESP" | jq -r '.id'
 }
 
-# --- Main cycle VM ---
+# --- Основний цикл по VM ---
 PAGE=1
 while :; do
-    RESP=$(curl -s -H "Accept: application/*+json;version=38.1" -H "Authorization: Bearer $CLOUD_TOKEN" \
-        "$CLOUD_URL/api/query?type=vm&page=$PAGE&pageSize=25&format=records")
+    RESP=$(curl -s -H "Accept: application/*+json;version=38.1" -H "Authorization: Bearer $VCLOUD_TOKEN" \
+        "$VCLOUD_HOST/api/query?type=vm&page=$PAGE&pageSize=25&format=records")
 
     VM_LIST=$(echo "$RESP" | jq -c '.record[]?')
     if [ -z "$VM_LIST" ]; then
@@ -150,12 +188,19 @@ while :; do
         DISK=$(echo "$vm" | jq -r '.totalStorageAllocatedMb')
         IS_TEMPLATE=$(echo "$vm" | jq -r '.isVAppTemplate')
 
+
         if [ "$IS_TEMPLATE" = "true" ] && [ "$SYNC_TEMPLATES" != "true" ]; then
-                    log "⏭ Template omitted $NAME (isVAppTemplate=true)"
+                    log "⏭ Пропущено шаблон $NAME (isVAppTemplate=true)"
                     continue
                 fi
 
-        DETAILS=$(curl -s -H "Accept: application/*+json;version=38.1" -H "Authorization: Bearer $CLOUD_TOKEN" "$HREF")
+
+        if [ "$STATUS" = "POWERED_OFF" ] && [ "$SYNC_POWEROFF" != "true" ]; then
+                    log "⏭ Пропущено вимкнену VM $NAME (status=POWERED_OFF)"
+                    continue
+               fi
+
+        DETAILS=$(curl -s -H "Accept: application/*+json;version=38.1" -H "Authorization: Bearer $VCLOUD_TOKEN" "$HREF")
 
         echo "$DETAILS" | jq -c '.section[]? | select(._type=="NetworkConnectionSectionType") | .networkConnection[]?' | while read -r conn; do
             IP=$(echo "$conn" | jq -r '.ipAddress // ""')
@@ -166,7 +211,7 @@ while :; do
             log "↘️ vCloud: $NAME | $STATUS | CPU:$CPU | RAM:$RAM | IP:$IP | Ext:$EXT_IP | MAC:$MAC | Net:$NET | Disk:$DISK"
 
             VM_ID=$(create_vm "$NAME" "$STATUS" "$CPU" "$RAM" "$IP" "$EXT_IP" "$MAC" "$NET" "$DISK")
-            log "✅ Create VM $NAME (ID: $VM_ID)"
+            log "✅ Створено VM $NAME (ID: $VM_ID)"
 
             IFACE_ID=$(create_interface "$VM_ID")
             log "✅ Додано інтерфейс до VM $NAME (Iface ID: $IFACE_ID)"
@@ -188,4 +233,4 @@ while :; do
     PAGE=$((PAGE+1))
 done
 
-log "=== Sync complite ==="
+log "=== Синхронізація завершена ==="
