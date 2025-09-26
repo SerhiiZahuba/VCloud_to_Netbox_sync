@@ -22,14 +22,10 @@ touch "$LOG_FILE"
 
 # ==================================
 
-
-# ==================================
-
 log() {
     echo "[$(date '+%F %T')] $1" | tee -a "$LOG_FILE"
 }
 
-# --- get token ---- #
 
 get_vcloud_token() {
   local creds
@@ -84,6 +80,14 @@ fi
 log "✅ Підключення до NetBox успішне"
 
 
+# --- Функції роботи з NetBox ---
+find_vm_in_netbox() {
+    local NAME="$1"
+    RESP=$(curl -s -H "Authorization: Token $NETBOX_TOKEN" \
+        "$NETBOX_URL/virtualization/virtual-machines/?name=$NAME")
+    echo "$RESP" | jq -r '.results[0].id // empty'
+}
+
 
 # --- Функції роботи з NetBox ---
 create_vm() {
@@ -133,6 +137,39 @@ create_vm() {
 }
 
 
+update_vm() {
+    local VM_ID="$1"
+    local STATUS="$2"
+    local CPU="$3"
+    local RAM="$4"
+    local DISK="$5"
+    local IP="$6"
+    local EXT_IP="$7"
+    local MAC="$8"
+    local NET="$9"
+
+    RESP=$(curl -s -X PATCH "$NETBOX_URL/virtualization/virtual-machines/$VM_ID/" \
+        -H "Authorization: Token $NETBOX_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"status\": \"active\",
+            \"vcpus\": $CPU,
+            \"memory\": $RAM,
+            \"disk\": $DISK,
+            \"local_context_data\": {
+                \"ip_address\": \"$IP\",
+                \"external_ip\": \"$EXT_IP\",
+                \"mac\": \"$MAC\",
+                \"network\": \"$NET\",
+                \"cloud_status\": \"$STATUS\"
+            }
+        }")
+
+    echo "$RESP" | jq -r '.id // empty'
+}
+
+
+
 create_interface() {
     local VM_ID="$1"
 
@@ -175,9 +212,7 @@ while :; do
         "$VCLOUD_HOST/api/query?type=vm&page=$PAGE&pageSize=25&format=records")
 
     VM_LIST=$(echo "$RESP" | jq -c '.record[]?')
-    if [ -z "$VM_LIST" ]; then
-        break
-    fi
+    [ -z "$VM_LIST" ] && break
 
     echo "$VM_LIST" | while read -r vm; do
         NAME=$(echo "$vm" | jq -r '.name')
@@ -185,20 +220,12 @@ while :; do
         HREF=$(echo "$vm" | jq -r '.href')
         CPU=$(echo "$vm" | jq -r '.numberOfCpus // 0')
         RAM=$(echo "$vm" | jq -r '.memoryMB // 0')
-        DISK=$(echo "$vm" | jq -r '.totalStorageAllocatedMb')
+        DISK=$(echo "$vm" | jq -r '.totalStorageAllocatedMb // 0')
         IS_TEMPLATE=$(echo "$vm" | jq -r '.isVAppTemplate')
 
-
-        if [ "$IS_TEMPLATE" = "true" ] && [ "$SYNC_TEMPLATES" != "true" ]; then
-                    log "⏭ Пропущено шаблон $NAME (isVAppTemplate=true)"
-                    continue
-                fi
-
-
-        if [ "$STATUS" = "POWERED_OFF" ] && [ "$SYNC_POWEROFF" != "true" ]; then
-                    log "⏭ Пропущено вимкнену VM $NAME (status=POWERED_OFF)"
-                    continue
-               fi
+        # Фільтри
+        [ "$IS_TEMPLATE" = "true" ] && [ "$SYNC_TEMPLATES" != "true" ] && { log "⏭ Пропущено шаблон $NAME"; continue; }
+        [ "$STATUS" = "POWERED_OFF" ] && [ "$SYNC_POWEROFF" != "true" ] && { log "⏭ Пропущено вимкнену VM $NAME"; continue; }
 
         DETAILS=$(curl -s -H "Accept: application/*+json;version=38.1" -H "Authorization: Bearer $VCLOUD_TOKEN" "$HREF")
 
@@ -208,23 +235,25 @@ while :; do
             MAC=$(echo "$conn" | jq -r '.macAddress // ""')
             NET=$(echo "$conn" | jq -r '.network // ""')
 
-            log "↘️ vCloud: $NAME | $STATUS | CPU:$CPU | RAM:$RAM | IP:$IP | Ext:$EXT_IP | MAC:$MAC | Net:$NET | Disk:$DISK"
+            log "↘️ vCloud: $NAME | $STATUS | CPU:$CPU | RAM:$RAM | Disk:$DISK | IP:$IP | Ext:$EXT_IP | MAC:$MAC | Net:$NET"
 
-            VM_ID=$(create_vm "$NAME" "$STATUS" "$CPU" "$RAM" "$IP" "$EXT_IP" "$MAC" "$NET" "$DISK")
-            log "✅ Створено VM $NAME (ID: $VM_ID)"
+            # Шукаємо у NetBox
+            VM_ID=$(find_vm_in_netbox "$NAME")
+            if [ -z "$VM_ID" ]; then
+                VM_ID=$(create_vm "$NAME" "$STATUS" "$CPU" "$RAM" "$IP" "$EXT_IP" "$MAC" "$NET" "$DISK")
+                log "🆕 Створено VM $NAME (ID: $VM_ID)"
+            else
+                update_vm "$VM_ID" "$STATUS" "$CPU" "$RAM" "$DISK" "$IP" "$EXT_IP" "$MAC" "$NET"
+                log "♻️ Оновлено VM $NAME (ID: $VM_ID)"
+            fi
 
+            # Додаємо інтерфейс, якщо нова VM
             IFACE_ID=$(create_interface "$VM_ID")
-            log "✅ Додано інтерфейс до VM $NAME (Iface ID: $IFACE_ID)"
+            [ -n "$IFACE_ID" ] && log "✅ Додано інтерфейс (Iface ID: $IFACE_ID)"
 
-            if [ -n "$IP" ]; then
-                IP_ID=$(create_ip "$IFACE_ID" "$IP")
-                log "✅ Призначено Internal IP $IP (IP ID: $IP_ID)"
-            fi
-
-            if [ -n "$EXT_IP" ]; then
-                EXT_IP_ID=$(create_ip "$IFACE_ID" "$EXT_IP")
-                log "✅ Призначено External IP $EXT_IP (IP ID: $EXT_IP_ID)"
-            fi
+            # Прив'язуємо IP
+            [ -n "$IP" ] && { IP_ID=$(create_ip "$IFACE_ID" "$IP"); log "✅ Призначено IP $IP (ID: $IP_ID)"; }
+            [ -n "$EXT_IP" ] && { EXT_IP_ID=$(create_ip "$IFACE_ID" "$EXT_IP"); log "✅ Призначено External IP $EXT_IP (ID: $EXT_IP_ID)"; }
         done
 
         sleep 1
