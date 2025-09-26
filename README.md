@@ -12,7 +12,6 @@ Before running the sync, make sure you have the following:
 ### From vCloud
 1. Username & password (create user in vCloud admin panel)
 2. vCloud API URL
-3. API token
 
 ### From Netbox
 1. Netbox API URL
@@ -32,9 +31,10 @@ Before running the sync, make sure you have the following:
     - Assigned IPs
     - CPU & Memory configuration
 
-- 📦 **Template Synchronization**
-  - Sync vCloud templates into Netbox
-  - Can be disabled via configuration (`sync_templates=false`)
+- 📦 **Config Synchronization**
+  - Sync vCloud templates into Netbox (Can be disabled via configuration `SYNC_TEMPLATES=false`)
+  - Sync by power status into Netbox (Can be disabled via configuration `SYNC_POWEROFF=false`)
+    
 
 ---
 
@@ -56,10 +56,10 @@ Example `.env`:
 
 ```env
 # VCloud
-VCLOUD_URL=https://vcloud.example.com/api
+VCLOUD_HOST=https://vcloud.example.com/api
 VCLOUD_USER=api-user
 VCLOUD_PASS=secret
-VCLOUD_TOKEN=your-token
+
 
 # Netbox
 NETBOX_URL=https://netbox.example.com/api
@@ -67,3 +67,4 @@ NETBOX_TOKEN=your-netbox-token
 
 # Options
 SYNC_TEMPLATES=true
+SYNC_POWEROFF=true
