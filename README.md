@@ -10,7 +10,7 @@ The goal is to keep Netbox up to date with virtual machines and templates from v
 Before running the sync, make sure you have the following:
 
 ### From vCloud
-1. Username & password (create user in vCloud admin panel)
+1. Username & password (create (only read) user in vCloud admin panel)
 2. vCloud API URL
 
 ### From Netbox
