@@ -46,6 +46,8 @@ Before running the sync, make sure you have the following:
 - ⚡ **VM Status Tracking**  
   Synchronize power state (`ON/OFF`) from vCloud to Netbox
 
+- add mac adress to sync  
+
 ---
 
 ## ⚙️ Configuration
