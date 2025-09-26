@@ -5,6 +5,8 @@ import base64
 import time
 from datetime import datetime
 import sys
+import json
+from datetime import datetime
 from dotenv import load_dotenv
 
 # === Завантаження .env ===
@@ -28,14 +30,32 @@ SYNC_TEMPLATES = os.getenv("SYNC_TEMPLATES", "false").lower() == "true"
 SYNC_POWEROFF = os.getenv("SYNC_POWEROFF", "false").lower() == "true"
 
 LOG_FILE = "sync_vms.log"
+JSON_LOG_DIR = "Log"
+JSON_LOG_FILE = os.path.join(JSON_LOG_DIR, "sync_vms.jsonl")
+
+os.makedirs(JSON_LOG_DIR, exist_ok=True)
 
 
-def log(msg: str):
-    line = f"[{datetime.now().strftime('%F %T')}] {msg}"
+def log(msg: str, **kwargs):
+
+    timestamp = datetime.now().strftime("%F %T")
+
+
+    line = f"[{timestamp}] {msg}"
     print(line)
     with open(LOG_FILE, "a") as f:
         f.write(line + "\n")
 
+
+    log_entry = {
+        "timestamp": timestamp,
+        "message": msg,
+    }
+    if kwargs:  
+        log_entry.update(kwargs)
+
+    with open(JSON_LOG_FILE, "a") as jf:
+        jf.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
 
 # === vCloud API ===
 class VCloudClient:
