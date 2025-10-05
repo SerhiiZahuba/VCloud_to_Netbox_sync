@@ -41,12 +41,11 @@ Before running the sync, make sure you have the following:
 ## 🚀 Roadmap / Plans
 
 - 🔄 **Update existing VM data**  
-  Keep Netbox in sync with real-time vCloud changes (IPs, CPUs, memory, interfaces)
+.....
 
 - ⚡ **VM Status Tracking**  
-  Synchronize power state (`ON/OFF`) from vCloud to Netbox
-
-- add mac adress to sync  
+  add mac adress to sync
+  add ip as primary  
 
 ---
 
