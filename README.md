@@ -41,11 +41,11 @@ Before running the sync, make sure you have the following:
 ## 🚀 Roadmap / Plans
 
 - 🔄 **Update existing VM data**  
-.....
+ add mac adress to sync
+ add ip as primary
 
 - ⚡ **VM Status Tracking**  
-  add mac adress to sync
-  add ip as primary  
+  delete old vm  
 
 ---
 
