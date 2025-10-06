@@ -47,6 +47,9 @@ Before running the sync, make sure you have the following:
 - ⚡ **VM Status Tracking**  
   delete old vm  
 
+- **Other**
+  move scripts to Netbox plugins
+
 ---
 
 ## ⚙️ Configuration
